@@ -5,6 +5,12 @@ find_package(libpqxx REQUIRED)
 
 add_library(cpppg
     src/ConnectionPool.cpp
+    src/Connection.cpp
+    src/Result.cpp
+    include/cpppg/Result.h
+        include/cpppg/Connection.h
+        src/Transaction.cpp
+        include/cpppg/Transaction.h
 )
 
 target_compile_features(cpppg PUBLIC cxx_std_23)
@@ -20,6 +26,6 @@ elseif(TARGET Boost::boost)
 endif()
 
 target_link_libraries(cpppg
-    PUBLIC
+    PRIVATE
         libpqxx::pqxx
 )

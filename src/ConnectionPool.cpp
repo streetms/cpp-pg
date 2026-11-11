@@ -1,5 +1,19 @@
 #include <cpppg/ConnectionPool.h>
+
+#include <condition_variable>
+#include <mutex>
+#include <queue>
+#include <utility>
+#include <vector>
+
 namespace db {
+    struct ConnectionPool::Impl {
+        std::vector<std::unique_ptr<Connection>> connections_;
+        std::queue<Connection*> idle_;
+        std::mutex mutex_;
+        std::condition_variable cv_;
+    };
+
     ConnectionGuard::ConnectionGuard(ConnectionGuard &&other) noexcept
             : conn_(other.conn_), pool_(other.pool_) {
         other.conn_ = nullptr;
@@ -31,33 +45,36 @@ namespace db {
         }
     }
 
-    ConnectionPool::ConnectionPool(std::string_view conn_info, size_t size,
-                                   ConnectionInitializer initialize_connection) {
-        for (size_t i = 0; i < size; ++i) {
-            connections_.emplace_back(
-                std::make_unique<pqxx::connection>(conn_info.data())
+    ConnectionPool::ConnectionPool(std::string_view conn_info, std::size_t size,
+                                   ConnectionInitializer initialize_connection)
+        : impl_(std::make_unique<Impl>()) {
+        for (std::size_t i = 0; i < size; ++i) {
+            impl_->connections_.emplace_back(
+                std::unique_ptr<Connection>(new Connection(conn_info))
             );
             if (initialize_connection) {
-                initialize_connection(*connections_.back());
+                initialize_connection(*impl_->connections_.back());
             }
-            idle_.push(connections_.back().get());
+            impl_->idle_.push(impl_->connections_.back().get());
         }
     }
 
+    ConnectionPool::~ConnectionPool() = default;
+
     ConnectionGuard ConnectionPool::acquire() {
-        std::unique_lock lock(mutex_);
+        std::unique_lock lock(impl_->mutex_);
 
-        cv_.wait(lock, [&] { return !idle_.empty(); });
+        impl_->cv_.wait(lock, [&] { return !impl_->idle_.empty(); });
 
-        auto* conn = idle_.front();
-        idle_.pop();
+        auto* conn = impl_->idle_.front();
+        impl_->idle_.pop();
 
         return ConnectionGuard(conn, this);
     }
 
-    void ConnectionPool::release(pqxx::connection *conn) {
-        std::lock_guard lock(mutex_);
-        idle_.push(conn);
-        cv_.notify_one();
+    void ConnectionPool::release(Connection *conn) {
+        std::lock_guard lock(impl_->mutex_);
+        impl_->idle_.push(conn);
+        impl_->cv_.notify_one();
     }
 }

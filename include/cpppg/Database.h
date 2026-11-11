@@ -1,11 +1,11 @@
 #pragma once
 #include "ConnectionPool.h"
+#include "Transaction.h"
 
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/thread_pool.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/awaitable.hpp>
-#include <pqxx/pqxx>
 
 #include <type_traits>
 #include <utility>
@@ -19,14 +19,14 @@ namespace db {
             : pool_(pool), conn_pool_(conn_pool) {}
 
         template<typename Func>
-        auto run(Func fn) -> net::awaitable<std::invoke_result_t<Func, pqxx::work&>>
+        auto run(Func fn) -> net::awaitable<std::invoke_result_t<Func, Transaction&>>
         {
-            using Result = std::invoke_result_t<Func, pqxx::work&>;
+            using Result = std::invoke_result_t<Func, Transaction&>;
             co_return co_await net::co_spawn(
                 pool_,
                 [this, fn = std::move(fn)]() -> net::awaitable<Result> {
                     auto conn = conn_pool_.acquire();
-                    pqxx::work tx(*conn);
+                    Transaction tx(conn);
 
                     if constexpr (std::is_void_v<Result>) {
                         fn(tx);
